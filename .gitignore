@@ -1,0 +1,7 @@
+CMakeCache.txt
+CMakeFiles
+yaml-cpp.pc
+replicatord
+cmake_install.cmake
+.*.sw*
+Makefile

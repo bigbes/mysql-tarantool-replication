@@ -17,13 +17,10 @@ void DBReader::DumpTables(std::string& binlog_name, unsigned long& binlog_pos, c
 	tempslave.init();
 	tempslave.createDatabaseStructure();
 
-	// last_event_when = ::time(NULL);
-
-	slave::Slave::binlog_pos_t bp = tempslave.getLastBinlog();
-	binlog_name = bp.first;
-	binlog_pos = bp.second;
-
-	state.setMasterLogNamePos(bp.first, bp.second);
+	slave::Position bp = tempslave.getLastBinlogPos();
+	binlog_name = bp.log_name;
+	binlog_pos = bp.log_pos;
+	state.setMasterPosition(bp);
 
 	// dump tables
 	nanomysql::Connection conn(slave.masterInfo().conn_options);
@@ -74,8 +71,12 @@ void DBReader::DumpTables(std::string& binlog_name, unsigned long& binlog_pos, c
 
 void DBReader::ReadBinlog(const std::string& binlog_name, unsigned long binlog_pos, const BinlogEventCallback& cb)
 {
+	slave::Position bp;
+	bp.log_name = binlog_name;
+	bp.log_pos  = binlog_pos;
+
 	stopped = false;
-	state.setMasterLogNamePos(binlog_name, binlog_pos);
+	state.setMasterPosition(bp);
 
 	for (auto table = tables.begin(), end = tables.end(); table != end; ++table) {
 		slave.setCallback(
@@ -119,8 +120,9 @@ void DBReader::EventCallbackNormal(
 		default: return;
 	}
 
-	ev->binlog_name = state.getMasterLogName();
-	ev->binlog_pos = state.getMasterLogPos();
+	slave::Position bp; state.getMasterPosition(bp);
+	ev->binlog_name = bp.log_name;
+	ev->binlog_pos  = bp.log_pos;
 	// ev->seconds_behind_master = GetSecondsBehindMaster();
 	// ev->unix_timestamp = long(time(NULL));
 	ev->database = event.db_name;
@@ -129,7 +131,7 @@ void DBReader::EventCallbackNormal(
 	for (auto fi = filter.begin(), end = filter.end(); fi != end; ++fi) {
 		const auto ri = event.m_row.find(fi->first);
 		if (ri != event.m_row.end()) {
-			ev->row[ fi->second.first ] = ri->second;
+			ev->row[ fi->second.first ] = ri->second.second;
 		}
 	}
 	stopped = cb(std::move(ev));
@@ -153,8 +155,9 @@ void DBReader::EventCallbackNullify(
 		default: return;
 	}
 
-	ev->binlog_name = state.getMasterLogName();
-	ev->binlog_pos = state.getMasterLogPos();
+	slave::Position bp; state.getMasterPosition(bp);
+	ev->binlog_name = bp.log_name;
+	ev->binlog_pos  = bp.log_pos;
 	// ev->seconds_behind_master = GetSecondsBehindMaster();
 	// ev->unix_timestamp = long(time(NULL));
 	ev->database = event.db_name;
@@ -177,8 +180,9 @@ void DBReader::XidEventCallback(unsigned int server_id, const BinlogEventCallbac
 
 	// send binlog position update event
 	SerializableBinlogEventPtr ev(new SerializableBinlogEvent);
-	ev->binlog_name = state.getMasterLogName();
-	ev->binlog_pos = state.getMasterLogPos();
+	slave::Position bp; state.getMasterPosition(bp);
+	ev->binlog_name = bp.log_name;
+	ev->binlog_pos  = bp.log_pos;
 	// ev->seconds_behind_master = GetSecondsBehindMaster();
 	// ev->unix_timestamp = long(time(NULL));
 	ev->event = "IGNORE";

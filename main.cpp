@@ -23,6 +23,7 @@ static const char *default_pid_filename = "/var/run/replicatord.pid";
 static const char *default_log_filename = "/var/log/replicatord.log";
 static const char *default_config_filename = "/usr/local/etc/replicatord.cfg";
 
+/* This flag means that we should terminate process */
 static volatile bool is_term = false;
 static volatile bool reset = false;
 
@@ -40,9 +41,10 @@ static Queue<SerializableBinlogEventPtr> queue(50);
 
 static void tpwriter_worker()
 {
+
 	while (!is_term)
 	{
-		while (!tpwriter->Connect());
+		while (tpwriter->Connect() == false); // Try to connect while you can
 
 		// send initial binlog position to the db thread
 		try {
@@ -60,13 +62,14 @@ static void tpwriter_worker()
 		}
 		catch (std::range_error& ex) {
 			is_term = true;
-			std::cout << ex.what() << std::endl;
+			std::cout << "Internal error: " << ex.what() << ", stopping TPWriter worker" << std::endl;
 			// loop exit
+			break;
 		}
 		catch (std::exception& ex) {
-			std::cout << ex.what() << std::endl;
+			std::cout << "Internal error: " << ex.what() << ", reconnecting" << std::endl;
 			tpwriter->Disconnect();
-			// reconnect
+			continue;
 		}
 	}
 
@@ -93,10 +96,12 @@ static void mysql_worker()
 			if (!is_term && !reset && binlog_name == "" && binlog_pos == 0) {
 				std::cout << "Tarantool reported null binlog position. Dumping tables..." << std::endl;
 				dbreader->DumpTables(binlog_name, binlog_pos, dbread_callback);
+				std::cout << "Done dumping tables" << std::endl;
 			}
 			if (!is_term && !reset) {
 				std::cout << "Reading binlogs (" << binlog_name << ", " << binlog_pos << ")..." << std::endl;
 				dbreader->ReadBinlog(binlog_name, binlog_pos, dbread_callback);
+				std::cout << "Done reading binlogs" << std::endl;
 			}
 		}
 		catch (std::exception& ex) {
